@@ -4,6 +4,33 @@ import { requestContext, runtimeCacheEnv } from "@/lib/runtimeCache";
 
 export const dynamic = "force-dynamic";
 
+// Field names and types of the cache client, with URL-like strings reduced to
+// their host and resolved. Other string values are omitted: they may be
+// credentials.
+async function describeFieldsAsync(
+  value: object,
+): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {};
+  for (const [name, field] of Object.entries(value)) {
+    if (typeof field === "string" && /^https?:\/\//.test(field)) {
+      const host = new URL(field).hostname;
+      out[name] = {
+        host,
+        addresses: await lookup(host, { all: true })
+          .then((entries) => entries.map((entry) => entry.address))
+          .catch((error: unknown) => `lookup failed: ${String(error)}`),
+      };
+    } else if (typeof field === "function") {
+      out[name] = "function";
+    } else if (field != null && typeof field === "object") {
+      out[name] = { type: "object", keys: Object.keys(field) };
+    } else {
+      out[name] = typeof field;
+    }
+  }
+  return out;
+}
+
 // Reports which Runtime Cache client getCache() uses on this deployment and
 // where its endpoint resolves. Header values are credentials, so only their
 // names are returned.
@@ -37,6 +64,7 @@ export async function GET() {
         ? null
         : {
             className: contextCache.constructor?.name ?? null,
+            fields: await describeFieldsAsync(contextCache),
             getSource:
               typeof contextCache.get === "function"
                 ? String(contextCache.get).slice(0, 2000)

@@ -1,4 +1,5 @@
 import { getCache } from "@vercel/functions";
+import { traceFetches } from "@/lib/fetchTrace";
 import { instanceInfo } from "@/lib/instance";
 import { requestContext, runtimeCacheEnv } from "@/lib/runtimeCache";
 
@@ -6,17 +7,18 @@ export const dynamic = "force-dynamic";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Stores an entry with a 1 second TTL, waits for it to go stale, then reads
-// it twice: through getCache(), and directly against the endpoint to show the
-// x-vercel-cache-state header that sends BuildCache.get() down the
-// `res.body?.cancel?.()` branch.
+// Stores an entry with a 1 second TTL, waits for it to go stale, then reads it
+// back through getCache(). `afterTtl.fetches` shows the x-vercel-cache-state
+// the endpoint returned; any value other than "fresh" sends get() down the
+// `res.body?.cancel?.()` branch. `direct` repeats this against
+// RUNTIME_CACHE_ENDPOINT when the runtime exposes it.
 export async function GET() {
   const key = `stale-repro-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const cache = getCache();
   await cache.set(key, { hello: "world" }, { ttl: 1 });
   const fresh = await cache.get(key);
   await sleep(2500);
-  const afterTtl = await cache.get(key);
+  const afterTtl = await traceFetches(() => cache.get(key));
 
   let direct: Record<string, unknown> | null = null;
   const env = runtimeCacheEnv();
